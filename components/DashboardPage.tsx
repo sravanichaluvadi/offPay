@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   UserIcon,
   BellIcon,
@@ -12,10 +12,12 @@ import {
   CogIcon,
   LogoutIcon,
   UssdIcon,
-  SmsIcon,
   CreditCardIcon,
   XCircleIcon,
+  SparklesIcon,
 } from './icons';
+import { GoogleGenAI, FunctionDeclaration, Type, Modality } from '@google/genai';
+
 
 export interface Goal {
   name: string;
@@ -23,16 +25,45 @@ export interface Goal {
   color: string;
   className: string;
 }
+
+type SendMoneyData = { amount: string; recipient: string };
+
 interface DashboardPageProps {
     userName: string;
     phoneNumber: string;
     onLogout: () => void;
-    onSendMoney: () => void;
+    onSendMoney: (data?: SendMoneyData) => void;
     onPayQr: () => void;
     onUssdPay: () => void;
     originalPin: string;
     onShowGoalDetails: () => void;
 }
+
+// TTS Audio Decoding Helper Functions (as per Gemini API guidelines)
+function decode(base64: string) {
+  const binaryString = atob(base64);
+  const len = binaryString.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  return bytes;
+}
+
+async function decodeAudioData(
+  data: Uint8Array,
+  ctx: AudioContext,
+): Promise<AudioBuffer> {
+  const dataInt16 = new Int16Array(data.buffer);
+  const frameCount = dataInt16.length;
+  const buffer = ctx.createBuffer(1, frameCount, 24000); // Mono, 24kHz sample rate
+  const channelData = buffer.getChannelData(0);
+  for (let i = 0; i < frameCount; i++) {
+    channelData[i] = dataInt16[i] / 32768.0;
+  }
+  return buffer;
+}
+
 
 const DashboardHeader: React.FC<{ userName: string; onLogout: () => void }> = ({ userName, onLogout }) => (
     <header className="flex justify-between items-center p-6 bg-blue-900 text-white rounded-b-3xl">
@@ -215,16 +246,53 @@ const BottomNavBar: React.FC = () => (
     </div>
 );
 
-const VoiceAssistantModal: React.FC<{ error: string; onClose: () => void }> = ({ error, onClose }) => (
-    <div className="absolute inset-0 bg-black/70 backdrop-blur-md flex items-center justify-center z-50 p-6" onClick={onClose}>
-        <div className="relative bg-white/10 rounded-3xl p-8 text-center flex flex-col items-center gap-6 w-full shadow-2xl text-white">
-            <MicrophoneIcon className="w-16 h-16 text-white animate-pulse-voice" />
-            <h2 className="text-2xl font-bold">
-                {error ? "Oops!" : "Listening..."}
-            </h2>
-            <p className="text-lg text-slate-300 min-h-[56px] flex items-center justify-center">
-                {error ? error : "Try 'Send Money' or 'Check Balance'."}
-            </p>
+type AssistantState = 'idle' | 'listening' | 'thinking' | 'speaking';
+
+const VoiceAssistantModal: React.FC<{
+    state: AssistantState;
+    userTranscript: string;
+    assistantResponse: string;
+    onClose: () => void;
+}> = ({ state, userTranscript, assistantResponse, onClose }) => (
+    <div className="absolute inset-0 bg-black/70 backdrop-blur-md flex flex-col justify-end z-50 p-4" onClick={onClose}>
+        <div className="w-full bg-slate-800/80 rounded-3xl p-6 text-white flex flex-col gap-6 animate-fade-in-up" onClick={e => e.stopPropagation()}>
+            {userTranscript && (
+                <div className="text-right">
+                    <p className="inline-block bg-blue-600 rounded-xl rounded-br-none px-4 py-2">{userTranscript}</p>
+                </div>
+            )}
+            
+            {(state === 'thinking' || assistantResponse) && (
+                 <div className="text-left">
+                    <div className="inline-block bg-slate-700 rounded-xl rounded-bl-none px-4 py-2">
+                       {state === 'thinking' ? (
+                            <div className="flex items-center gap-2">
+                                <span className="w-2 h-2 bg-slate-400 rounded-full animate-bounce delay-0"></span>
+                                <span className="w-2 h-2 bg-slate-400 rounded-full animate-bounce" style={{animationDelay: '0.2s'}}></span>
+                                <span className="w-2 h-2 bg-slate-400 rounded-full animate-bounce" style={{animationDelay: '0.4s'}}></span>
+                            </div>
+                       ) : (
+                           <p>{assistantResponse}</p>
+                       )}
+                    </div>
+                </div>
+            )}
+            
+            <div className="flex items-center justify-center flex-col gap-4 mt-4">
+                <div className="w-20 h-20 rounded-full bg-blue-900 flex items-center justify-center">
+                    {state === 'listening' ? (
+                        <MicrophoneIcon className="w-10 h-10 text-white animate-pulse-voice" />
+                    ) : (
+                        <SparklesIcon className="w-10 h-10 text-white"/>
+                    )}
+                </div>
+                <p className="text-slate-300 text-center">
+                   {state === 'listening' && "Listening..."}
+                   {state === 'thinking' && "Thinking..."}
+                   {state === 'speaking' && "Speaking..."}
+                   {state === 'idle' && "How can I help?"}
+                </p>
+            </div>
         </div>
     </div>
 );
@@ -235,9 +303,15 @@ const DashboardPage: React.FC<DashboardPageProps> = ({ userName, phoneNumber, on
   const [showBalanceModal, setShowBalanceModal] = useState(false);
   const [pinInput, setPinInput] = useState('');
   const [pinError, setPinError] = useState('');
-  const [isListening, setIsListening] = useState(false);
-  const [voiceError, setVoiceError] = useState('');
+  
+  // Voice Assistant State
+  const [isAssistantOpen, setIsAssistantOpen] = useState(false);
+  const [assistantState, setAssistantState] = useState<AssistantState>('idle');
+  const [userTranscript, setUserTranscript] = useState('');
+  const [assistantResponse, setAssistantResponse] = useState('');
+
   const recognitionRef = useRef<any>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
 
 
   const balance = "12,507.50";
@@ -247,75 +321,174 @@ const DashboardPage: React.FC<DashboardPageProps> = ({ userName, phoneNumber, on
     setPinError('');
     setShowPinModal(true);
   };
+  
+  const speakText = useCallback(async (text: string) => {
+    setAssistantState('speaking');
+    setAssistantResponse(text);
+
+    try {
+        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
+        const response = await ai.models.generateContent({
+            model: "gemini-2.5-flash-preview-tts",
+            contents: [{ parts: [{ text: `Say: ${text}` }] }],
+            config: { responseModalities: [Modality.AUDIO] },
+        });
+
+        const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+        if (base64Audio) {
+            if (!audioContextRef.current) {
+                audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+            }
+            const audioContext = audioContextRef.current;
+            const audioBuffer = await decodeAudioData(decode(base64Audio), audioContext);
+            const source = audioContext.createBufferSource();
+            source.buffer = audioBuffer;
+            source.connect(audioContext.destination);
+
+            return new Promise<void>(resolve => {
+                source.onended = () => resolve();
+                source.start();
+            });
+        }
+    } catch (error) {
+        console.error("TTS Error:", error);
+        setAssistantResponse("Sorry, I'm having trouble speaking right now.");
+    } finally {
+        setAssistantState('idle');
+    }
+  }, []);
+
+  const getAssistantResponse = useCallback(async (transcript: string) => {
+    setUserTranscript(transcript);
+    setAssistantState('thinking');
+    setAssistantResponse('');
+    
+    const sendMoneyTool: FunctionDeclaration = {
+      name: 'sendMoney',
+      parameters: {
+        type: Type.OBJECT,
+        description: 'Sends a specified amount of money to a recipient.',
+        properties: {
+          amount: { type: Type.NUMBER, description: 'The amount of money to send.' },
+          recipient: { type: Type.STRING, description: 'The 10-digit phone number of the recipient.' },
+        },
+        required: ['amount', 'recipient'],
+      },
+    };
+    
+    const checkBalanceTool: FunctionDeclaration = { name: 'checkBalance', parameters: { type: Type.OBJECT, properties: {} } };
+    const payWithQrTool: FunctionDeclaration = { name: 'payWithQr', parameters: { type: Type.OBJECT, properties: {} } };
+
+    try {
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
+      const response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: transcript,
+        config: {
+            tools: [{ functionDeclarations: [sendMoneyTool, checkBalanceTool, payWithQrTool] }],
+        },
+      });
+
+      if (response.functionCalls && response.functionCalls.length > 0) {
+        const fc = response.functionCalls[0];
+        if (fc.name === 'sendMoney') {
+            const { amount, recipient } = fc.args;
+            const cleanRecipient = String(recipient).replace(/\D/g, '');
+            if (amount > 0 && cleanRecipient.length === 10) {
+                await speakText(`OK, sending ₹${amount} to ${recipient}. Please confirm the details.`);
+                onSendMoney({ amount: String(amount), recipient: cleanRecipient });
+                setIsAssistantOpen(false);
+            } else {
+                await speakText("I seem to be missing some details. Could you please provide the amount and a 10-digit recipient number?");
+            }
+        } else if (fc.name === 'checkBalance') {
+            await speakText("Of course. Please enter your PIN to view your balance.");
+            handleRequestBalance();
+            setIsAssistantOpen(false);
+        } else if (fc.name === 'payWithQr') {
+            await speakText("Right away. Opening the QR payment screen.");
+            onPayQr();
+            setIsAssistantOpen(false);
+        }
+      } else {
+        await speakText(response.text);
+      }
+    } catch (error) {
+        console.error("Gemini Error:", error);
+        await speakText("I'm sorry, I ran into a problem. Could you try that again?");
+    } finally {
+        if(isAssistantOpen) setAssistantState('idle');
+    }
+
+  }, [isAssistantOpen, onSendMoney, onPayQr, speakText]);
 
   useEffect(() => {
-    // Fix: Cast window to `any` to access non-standard SpeechRecognition APIs.
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) {
       console.warn("Speech Recognition not supported by this browser.");
       return;
     }
-    const recognition = new SpeechRecognition();
+    recognitionRef.current = new SpeechRecognition();
+    const recognition = recognitionRef.current;
     recognition.continuous = false;
-    recognition.lang = 'en-US';
+    recognition.lang = 'en-IN';
     recognition.interimResults = false;
-    recognition.maxAlternatives = 1;
-
+    
     recognition.onresult = (event: any) => {
-      const transcript = event.results[0][0].transcript.toLowerCase().trim();
-      processCommand(transcript);
+      const transcript = event.results[0][0].transcript;
+      getAssistantResponse(transcript);
     };
 
     recognition.onerror = (event: any) => {
-      if (event.error === 'no-speech' || event.error === 'audio-capture') {
-        setVoiceError("I didn't hear anything. Please try again.");
-      } else if (event.error === 'not-allowed') {
-        setVoiceError("Microphone access was denied.");
-      } else {
-        setVoiceError("An error occurred. Please try again.");
-      }
-      setTimeout(() => setIsListening(false), 2500);
+        setAssistantState('idle');
+        if (event.error !== 'no-speech') {
+            console.error("Speech Recognition Error:", event.error);
+            setAssistantResponse("Sorry, I had trouble with the microphone.");
+        }
+    };
+
+    recognition.onend = () => {
+        if (assistantState === 'listening') {
+             setAssistantState('idle');
+        }
     };
     
-    recognitionRef.current = recognition;
-  }, []);
-
-  const processCommand = (command: string) => {
-    let commandRecognized = false;
-    if (command.includes('check balance') || command.includes('show balance')) {
-        commandRecognized = true;
-        handleRequestBalance();
-    } else if (command.includes('send money')) {
-        commandRecognized = true;
-        onSendMoney();
-    } else if (command.includes('hey qr') || command.includes('pay qr')) {
-        commandRecognized = true;
-        onPayQr();
+    return () => {
+        recognition.stop();
     }
+  }, [getAssistantResponse, assistantState]);
 
-    if (!commandRecognized) {
-        setVoiceError(`Sorry, I didn't understand "${command}".`);
-        setTimeout(() => setIsListening(false), 2500);
-    } else {
-        setIsListening(false);
-    }
-  };
 
-  const handleStartListening = () => {
-    if (recognitionRef.current) {
-        setVoiceError('');
-        setIsListening(true);
+  const startListening = useCallback(() => {
+    if (recognitionRef.current && assistantState === 'idle') {
         try {
+            setUserTranscript('');
+            setAssistantResponse('');
+            setAssistantState('listening');
             recognitionRef.current.start();
-        } catch(e) {
-            setVoiceError("Voice recognition is already active.");
-            setTimeout(() => setIsListening(false), 2500);
+        } catch (e) {
+            console.error("Could not start recognition:", e);
+            setAssistantState('idle');
         }
-    } else {
-        alert("Sorry, voice commands are not supported on this browser.");
     }
+  }, [assistantState]);
+  
+  const handleAssistantOpen = async () => {
+    setUserTranscript('');
+    setAssistantResponse('');
+    setIsAssistantOpen(true);
+    setAssistantState('idle');
+    await speakText("How can I help you?");
+    startListening();
   };
 
+  const handleAssistantClose = () => {
+    if (recognitionRef.current) {
+        recognitionRef.current.stop();
+    }
+    setIsAssistantOpen(false);
+    setAssistantState('idle');
+  }
 
   const handlePinVerify = () => {
     if (pinInput === originalPin) {
@@ -345,7 +518,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({ userName, phoneNumber, on
             <OfflinePayments onUssdPay={onUssdPay} />
         </main>
         <div className="absolute bottom-20 right-6 z-20">
-            <button onClick={handleStartListening} className="w-16 h-16 bg-blue-900 rounded-full shadow-lg flex items-center justify-center text-white transform hover:scale-110 transition-transform">
+            <button onClick={handleAssistantOpen} className="w-16 h-16 bg-blue-900 rounded-full shadow-lg flex items-center justify-center text-white transform hover:scale-110 transition-transform">
                 <MicrophoneIcon className="w-8 h-8"/>
             </button>
         </div>
@@ -353,7 +526,14 @@ const DashboardPage: React.FC<DashboardPageProps> = ({ userName, phoneNumber, on
              <BottomNavBar />
         </div>
 
-        {isListening && <VoiceAssistantModal error={voiceError} onClose={() => setIsListening(false)} />}
+        {isAssistantOpen && (
+            <VoiceAssistantModal
+                state={assistantState}
+                userTranscript={userTranscript}
+                assistantResponse={assistantResponse}
+                onClose={handleAssistantClose}
+            />
+        )}
 
 
         {showPinModal && (
@@ -432,6 +612,13 @@ const DashboardPage: React.FC<DashboardPageProps> = ({ userName, phoneNumber, on
           }
           .animate-pulse-voice {
             animation: pulse-voice 2s infinite ease-in-out;
+          }
+           @keyframes bounce {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-5px); }
+          }
+          .animate-bounce {
+            animation: bounce 1s infinite;
           }
         `}</style>
     </div>

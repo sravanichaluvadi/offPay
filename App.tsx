@@ -9,12 +9,15 @@ import GoalDetailsPage from './components/GoalDetailsPage';
 import { AppView } from './types';
 import { CheckCircleIcon, InformationCircleIcon } from './components/icons';
 
+type SendMoneyData = { amount: string; recipient: string };
+
 const App: React.FC = () => {
   const [view, setView] = useState<AppView>(AppView.Login);
   const [phoneNumber, setPhoneNumber] = useState<string>('');
   const [userName, setUserName] = useState<string>('');
   const [pin, setPin] = useState<string>('');
   const [notification, setNotification] = useState<{ title: string; message: string; show: boolean; type: 'success' | 'info' } | null>(null);
+  const [sendMoneyData, setSendMoneyData] = useState<SendMoneyData | null>(null);
 
   const handleLoginSuccess = useCallback((phone: string, name: string) => {
     setPhoneNumber(phone);
@@ -39,7 +42,8 @@ const App: React.FC = () => {
     setView(AppView.Login);
   }, []);
 
-  const handleStartSendMoney = useCallback(() => {
+  const handleStartSendMoney = useCallback((data?: SendMoneyData) => {
+    setSendMoneyData(data || null);
     setView(AppView.SendMoney);
   }, []);
   
@@ -62,6 +66,7 @@ const App: React.FC = () => {
       });
     }
     setView(AppView.Dashboard);
+    setSendMoneyData(null); // Clear data after completion
   }, []);
 
   const handlePayQrCompletion = useCallback((details: { amount: string }) => {
@@ -87,6 +92,7 @@ const App: React.FC = () => {
 
   const handleCancelSendMoney = useCallback(() => {
     setView(AppView.Dashboard);
+    setSendMoneyData(null); // Clear data on cancel
   }, []);
   
   const handleCancelPayQr = useCallback(() => {
@@ -127,7 +133,7 @@ const App: React.FC = () => {
       case AppView.Dashboard:
         return <DashboardPage userName={userName} phoneNumber={phoneNumber} onLogout={handleLogout} onSendMoney={handleStartSendMoney} onPayQr={handleStartPayQr} onUssdPay={handleStartUssdPay} originalPin={pin} onShowGoalDetails={handleShowGoalDetails} />;
       case AppView.SendMoney:
-        return <SendMoneyPage originalPin={pin} onSend={handleSendMoneyCompletion} onCancel={handleCancelSendMoney} />;
+        return <SendMoneyPage originalPin={pin} onSend={handleSendMoneyCompletion} onCancel={handleCancelSendMoney} initialRecipient={sendMoneyData?.recipient} initialAmount={sendMoneyData?.amount} />;
       case AppView.PayQr:
         return <PayQrPage originalPin={pin} onPay={handlePayQrCompletion} onCancel={handleCancelPayQr} userName={userName} phoneNumber={phoneNumber} />;
       case AppView.UssdPay:

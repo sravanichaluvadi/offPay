@@ -5,6 +5,8 @@ interface SendMoneyPageProps {
   originalPin: string;
   onSend: (details: { amount: string; recipient: string }) => void;
   onCancel: () => void;
+  initialRecipient?: string;
+  initialAmount?: string;
 }
 
 const formatToIndianCurrency = (value: string) => {
@@ -15,9 +17,9 @@ const formatToIndianCurrency = (value: string) => {
 };
 
 
-const SendMoneyPage: React.FC<SendMoneyPageProps> = ({ originalPin, onSend, onCancel }) => {
-  const [recipient, setRecipient] = useState('');
-  const [amount, setAmount] = useState(''); // Stores raw numeric string e.g., "100000"
+const SendMoneyPage: React.FC<SendMoneyPageProps> = ({ originalPin, onSend, onCancel, initialRecipient, initialAmount }) => {
+  const [recipient, setRecipient] = useState(initialRecipient || '');
+  const [amount, setAmount] = useState(initialAmount || ''); // Stores raw numeric string e.g., "100000"
   const [pin, setPin] = useState('');
   const [pinError, setPinError] = useState('');
 
@@ -114,6 +116,7 @@ const SendMoneyPage: React.FC<SendMoneyPageProps> = ({ originalPin, onSend, onCa
               placeholder="••••••"
               className="w-full bg-white border border-slate-300 focus:border-blue-900 focus:ring-1 focus:ring-blue-900 rounded-xl py-3 pl-12 pr-4 text-lg tracking-[8px] text-center"
               maxLength={6}
+              autoFocus={!!(initialAmount && initialRecipient)}
             />
           </div>
           {pinError && <p className="text-red-500 text-sm mt-2">{pinError}</p>}
