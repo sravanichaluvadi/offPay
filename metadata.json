@@ -1,0 +1,7 @@
+{
+  "name": "OffPay",
+  "description": "A mobile application designed to bridge the financial inclusion gap for underserved communities by providing offline payments, voice assistance, and smart money management tools with enhanced security.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
