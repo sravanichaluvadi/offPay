@@ -6,6 +6,7 @@ import SendMoneyPage from './components/SendMoneyPage';
 import PayQrPage from './components/PayQrPage';
 import UssdPage from './components/UssdPage';
 import GoalDetailsPage from './components/GoalDetailsPage';
+import HistoryPage from './components/HistoryPage';
 import { AppView } from './types';
 import { CheckCircleIcon, InformationCircleIcon } from './components/icons';
 
@@ -111,6 +112,14 @@ const App: React.FC = () => {
     setView(AppView.Dashboard);
   }, []);
 
+  const handleShowHistory = useCallback(() => {
+    setView(AppView.History);
+  }, []);
+
+  const handleBackFromHistory = useCallback(() => {
+    setView(AppView.Dashboard);
+  }, []);
+
   const handleCloseNotification = useCallback(() => {
      setNotification(prev => prev ? { ...prev, show: false } : null);
   }, []);
@@ -131,7 +140,7 @@ const App: React.FC = () => {
           />
         );
       case AppView.Dashboard:
-        return <DashboardPage userName={userName} phoneNumber={phoneNumber} onLogout={handleLogout} onSendMoney={handleStartSendMoney} onPayQr={handleStartPayQr} onUssdPay={handleStartUssdPay} originalPin={pin} onShowGoalDetails={handleShowGoalDetails} />;
+        return <DashboardPage userName={userName} phoneNumber={phoneNumber} onLogout={handleLogout} onSendMoney={handleStartSendMoney} onPayQr={handleStartPayQr} onUssdPay={handleStartUssdPay} originalPin={pin} onShowGoalDetails={handleShowGoalDetails} onShowHistory={handleShowHistory} />;
       case AppView.SendMoney:
         return <SendMoneyPage originalPin={pin} onSend={handleSendMoneyCompletion} onCancel={handleCancelSendMoney} initialRecipient={sendMoneyData?.recipient} initialAmount={sendMoneyData?.amount} />;
       case AppView.PayQr:
@@ -140,6 +149,8 @@ const App: React.FC = () => {
         return <UssdPage originalPin={pin} onCancel={handleCancelOfflinePay} onSuccess={handleUssdCompletion} />;
       case AppView.GoalDetails:
         return <GoalDetailsPage onBack={handleBackFromGoalDetails} />;
+      case AppView.History:
+        return <HistoryPage onBack={handleBackFromHistory} />;
       default:
         return <LoginPage onLoginSuccess={handleLoginSuccess} />;
     }

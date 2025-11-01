@@ -7,4 +7,5 @@ export enum AppView {
   PayQr = 'payQr',
   UssdPay = 'ussdPay',
   GoalDetails = 'goalDetails',
+  History = 'history',
 }

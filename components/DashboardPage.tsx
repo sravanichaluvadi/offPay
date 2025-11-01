@@ -37,6 +37,7 @@ interface DashboardPageProps {
     onUssdPay: () => void;
     originalPin: string;
     onShowGoalDetails: () => void;
+    onShowHistory: () => void;
 }
 
 // TTS Audio Decoding Helper Functions (as per Gemini API guidelines)
@@ -229,13 +230,13 @@ const OfflinePayments: React.FC<{ onUssdPay: () => void; }> = ({ onUssdPay }) =>
 );
 
 
-const BottomNavBar: React.FC = () => (
+const BottomNavBar: React.FC<{ onShowHistory: () => void }> = ({ onShowHistory }) => (
     <div className="sticky bottom-0 left-0 right-0 bg-white/80 backdrop-blur-sm border-t border-slate-200 p-2 flex justify-around items-center">
         <button className="flex flex-col items-center gap-1 text-blue-900">
             <HomeIcon className="w-6 h-6" />
             <span className="text-xs font-bold">Home</span>
         </button>
-        <button className="flex flex-col items-center gap-1 text-slate-500">
+        <button onClick={onShowHistory} className="flex flex-col items-center gap-1 text-slate-500">
             <ReceiptIcon className="w-6 h-6" />
             <span className="text-xs">History</span>
         </button>
@@ -298,7 +299,7 @@ const VoiceAssistantModal: React.FC<{
 );
 
 
-const DashboardPage: React.FC<DashboardPageProps> = ({ userName, phoneNumber, onLogout, onSendMoney, onPayQr, onUssdPay, originalPin, onShowGoalDetails }) => {
+const DashboardPage: React.FC<DashboardPageProps> = ({ userName, phoneNumber, onLogout, onSendMoney, onPayQr, onUssdPay, originalPin, onShowGoalDetails, onShowHistory }) => {
   const [showPinModal, setShowPinModal] = useState(false);
   const [showBalanceModal, setShowBalanceModal] = useState(false);
   const [pinInput, setPinInput] = useState('');
@@ -330,7 +331,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({ userName, phoneNumber, on
         const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
         const response = await ai.models.generateContent({
             model: "gemini-2.5-flash-preview-tts",
-            contents: [{ parts: [{ text: `Say: ${text}` }] }],
+            contents: [{ parts: [{ text: text }] }],
             config: { responseModalities: [Modality.AUDIO] },
         });
 
@@ -523,7 +524,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({ userName, phoneNumber, on
             </button>
         </div>
         <div className="absolute bottom-0 w-full">
-             <BottomNavBar />
+             <BottomNavBar onShowHistory={onShowHistory} />
         </div>
 
         {isAssistantOpen && (
